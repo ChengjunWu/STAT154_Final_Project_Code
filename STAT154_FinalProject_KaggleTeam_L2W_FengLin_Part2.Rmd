@@ -1,0 +1,192 @@
+---
+title: "fp-ols-mse"
+author: "Feng Lin"
+date: "5/5/2017"
+output: pdf_document
+---
+
+```{r}
+library(tm)
+library(nnet)
+library(e1071)
+
+data = read.csv('yelp_academic_dataset_review_train.csv')
+shuffle = sample(1:nrow(data), nrow(data))
+data = data[shuffle,]
+
+testing = list()
+for(i in 1:4) {
+  testing[[i]] = ((i-1)*29118+1):(i*29118)
+}
+########################1st fold; uncomment this block
+# review_train = data[-testing[[1]], ]
+# review_test = data[testing[[1]], ]
+
+########################2nd fold; uncomment this block
+# review_train = data[-testing[[2]], ]
+# review_test = data[testing[[2]], ]
+
+########################3rd fold; uncomment this block
+# review_train = data[-testing[[3]], ]
+# review_test = data[testing[[3]], ]
+
+########################4th fold; uncomment this block
+# review_train = data[-testing[[4]], ]
+# review_test = data[testing[[4]], ]
+
+########################
+reviews = as.vector(review_train$text)
+reviews.tt = as.vector(review_test$text)
+stopWords = c(stopwords("en"), "") 
+
+
+cleanCorpus = function(corpus){
+  # You can also use this function instead of the first. 
+  # Here you clean all the reviews at once using the 
+  # 'tm' package. Again, a lot more you can add to this function...
+  
+  review_corpus = tm_map(corpus, content_transformer(tolower))
+  review_corpus = tm_map(review_corpus, removeNumbers)
+  review_corpus = tm_map(review_corpus, removePunctuation)
+  review_corpus = tm_map(review_corpus, removeWords, c("the", "and", stopwords("english")))
+  review_corpus =  tm_map(review_corpus, stripWhitespace)
+}
+
+library(SnowballC)
+review_corpus = cleanCorpus(Corpus(VectorSource(reviews)))
+review_corpus.tt = cleanCorpus(Corpus(VectorSource(reviews.tt)))
+
+review_dtm = DocumentTermMatrix(review_corpus)
+review_dtm.tt = DocumentTermMatrix(review_corpus.tt)
+
+review_dtm = removeSparseTerms(review_dtm, 0.999)
+
+
+# install.packages("tidytext")
+library(tidytext)
+big.matrix = as.matrix(review_dtm)
+
+adj = colnames(big.matrix)[colnames(big.matrix) %in% sentiments$word]
+
+X_train = big.matrix[,colnames(big.matrix) %in% adj]
+
+y_train = review_train$stars
+
+trn.data = as.data.frame(cbind(y_train, X_train))
+
+```
+
+
+
+#ols
+```{r}
+basic_lin_mod = lm(y_train ~ ., data = trn.data)
+# colnames(preds.df) = colnames(trn.data)[-1]
+predicts.lm = predict(basic_lin_mod, preds.df)
+final.pred = predicts.lm
+
+write.csv(predicts.lm,"linearPred.csv", row.names = FALSE)
+
+submit = as.data.frame(cbind(business_id = as.character(review_test$business_id),
+                             predicts = as.numeric(final.pred)))
+submit = aggregate(as.numeric(as.character(final.pred)) ~ business_id, submit, mean)
+colnames(submit)[2] = "predicts"
+real_value = aggregate(stars ~ business_id, review_test, mean)
+
+write.csv(review_test$stars,"trueY.csv", row.names = FALSE)
+
+##############################
+# mse.lm1 = mean((submit$predicts- real_value$stars)^2)#1st fold; uncomment this line
+# mse.lm2 = mean((submit$predicts- real_value$stars)^2)#2nd fold; uncomment this line
+# mse.lm3 = mean((submit$predicts- real_value$stars)^2)#3rd fold; uncomment this line
+# mse.lm4 = mean((submit$predicts- real_value$stars)^2)#4th fold; uncomment this line
+# mse.lm.final = mean(mse.lm1,mse.lm2,mse.lm3,mse.lm4)#avg of all mse from 4 folds 
+##############################
+```
+
+
+#lasso
+```{r}
+library(glmnet)
+cv.lasso<-cv.glmnet(X_train,y_train, type.measure="mse",alpha =1, nfolds = 5)
+cv.lasso.pred = predict(cv.lasso, newx = preds, s = "lambda.min")
+final.pred = cv.lasso.pred
+
+write.csv(cv.lasso.pred,"lassoPred.csv", row.names = FALSE)
+
+submit = as.data.frame(cbind(business_id = as.character(review_test$business_id),
+                             predicts = as.numeric(final.pred)))
+submit = aggregate(as.numeric(as.character(final.pred)) ~ business_id, submit, mean)
+colnames(submit)[2] = "predicts"
+real_value = aggregate(stars ~ business_id, review_test, mean)
+
+write.csv(review_test$stars,"trueY.csv", row.names = FALSE)
+
+##############################
+# mse.lasso1 = mean((submit$predicts- real_value$stars)^2)#1st fold; uncomment this line
+# mse.lasso2 = mean((submit$predicts- real_value$stars)^2)#2nd fold; uncomment this line
+# mse.lasso3 = mean((submit$predicts- real_value$stars)^2)#3rd fold; uncomment this line
+# mse.lasso4 = mean((submit$predicts- real_value$stars)^2)#4th fold; uncomment this line
+# mse.lasso.final = mean(mse.lasso1,mse.lasso2,mse.lasso3,mse.lasso4)#avg of all mse from 4 folds 
+##############################
+```
+
+#ridge
+```{r}
+cv.ridge<-cv.glmnet(X_train,y_train, type.measure="mse",alpha = 0, nfolds = 5)
+cv.ridge.pred = predict(cv.ridge, newx = preds, s = "lambda.min")
+final.pred = cv.ridge.pred
+
+write.csv(cv.ridge.pred,"ridgePred.csv", row.names = FALSE)
+
+submit = as.data.frame(cbind(business_id = as.character(review_test$business_id),
+                             predicts = as.numeric(final.pred)))
+submit = aggregate(as.numeric(as.character(final.pred)) ~ business_id, submit, mean)
+colnames(submit)[2] = "predicts"
+real_value = aggregate(stars ~ business_id, review_test, mean)
+
+write.csv(review_test$stars,"trueY.csv", row.names = FALSE)
+
+##############################
+# mse.ridge1 = mean((submit$predicts- real_value$stars)^2)#1st fold; uncomment this line
+# mse.ridge2 = mean((submit$predicts- real_value$stars)^2)#2nd fold; uncomment this line
+# mse.ridge3 = mean((submit$predicts- real_value$stars)^2)#3rd fold; uncomment this line
+# mse.ridge4 = mean((submit$predicts- real_value$stars)^2)#4th fold; uncomment this line
+# mse.ridge.final = mean(mse.ridge1,mse.ridge2,mse.ridge3,mse.ridge4)#avg of all mse from 4 folds 
+##############################
+```
+
+#ordered logistic regression
+```{r}
+library(MASS)
+trn.data$y_train = as.factor(trn.data$y_train)
+ordered_logistic_regression = polr(y_train ~ ., data = trn.data)
+# colnames(preds.df) = colnames(trn.data)[-1]
+predicts.olr = predict(ordered_logistic_regression, preds.df)
+final.pred = predicts.olr
+
+write.csv(predicts.olr,"polrPred.csv", row.names = FALSE)
+
+submit = as.data.frame(cbind(business_id = as.character(review_test$business_id),
+                             predicts = as.numeric(final.pred)))
+submit = aggregate(as.numeric(as.character(final.pred)) ~ business_id, submit, mean)
+colnames(submit)[2] = "predicts"
+real_value = aggregate(stars ~ business_id, review_test, mean)
+
+write.csv(review_test$stars,"trueY.csv", row.names = FALSE)
+
+##############################
+# mse.olr1 = mean((submit$predicts- real_value$stars)^2)#1st fold; uncomment this line
+# mse.olr2 = mean((submit$predicts- real_value$stars)^2)#2nd fold; uncomment this line
+# mse.olr3 = mean((submit$predicts- real_value$stars)^2)#3rd fold; uncomment this line
+# mse.olr4 = mean((submit$predicts- real_value$stars)^2)#4th fold; uncomment this line
+# mse.olr.final = mean(mse.olr1,mse.olr2,mse.olr3,mse.olr4)#avg of all mse from 4 folds 
+##############################
+
+```
+
+
+
+
+
+
