@@ -1,0 +1,148 @@
+---
+title: "Stat 154 Final Project"
+author: 'Shuying Wu (SID: 24665015)'
+---
+```{r}
+library(tm)
+library(nnet)
+library(e1071)
+review.train <- read.csv(file = "yelp_academic_dataset_review_train.csv")
+review.test <- read.csv(file = "yelp_academic_dataset_review_test.csv")
+reviews <- as.vector(review.train$text)
+stopWords = c(stopwords("en"), "") 
+
+cleanCorpus = function(corpus){
+  # You can also use this function instead of the first. 
+  # Here you clean all the reviews at once using the 
+  # 'tm' package. Again, a lot more you can add to this function...
+  
+  review_corpus = tm_map(corpus, content_transformer(tolower))
+  review_corpus = tm_map(review_corpus, removeNumbers)
+  review_corpus = tm_map(review_corpus, removePunctuation)
+  review_corpus = tm_map(review_corpus, removeWords, c("the", "and", stopwords("english")))
+  review_corpus = tm_map(review_corpus, stemDocument)
+  review_corpus =  tm_map(review_corpus, stripWhitespace)
+}
+cleanCorpus.nostem = function(corpus){
+  # You can also use this function instead of the first. 
+  # Here you clean all the reviews at once using the 
+  # 'tm' package. Again, a lot more you can add to this function...
+  
+  review_corpus = tm_map(corpus, content_transformer(tolower))
+  review_corpus = tm_map(review_corpus, removeNumbers)
+  review_corpus = tm_map(review_corpus, removePunctuation)
+  review_corpus = tm_map(review_corpus, removeWords, c("the", "and", stopwords("english")))
+  review_corpus =  tm_map(review_corpus, stripWhitespace)
+}
+library(SnowballC)
+review_corpus = Corpus(VectorSource(reviews))
+
+# If you use the 'cleanCorpus' function you would do 
+review_corpus = cleanCorpus(Corpus(VectorSource(reviews)))
+review_corpus.nostem = cleanCorpus.nostem(Corpus(VectorSource(reviews)))
+# Create document term matrix - try TD-IDF
+review_dtm = DocumentTermMatrix(review_corpus) # 93k terms
+
+review_dtm.ns = DocumentTermMatrix(review_corpus)
+# Remove less frequent words
+review_dtm.ns = removeSparseTerms(review_dtm.ns, 0.999)
+
+install.packages("tidytext")
+library(tidytext)
+sentiments$word
+big.matrix = as.matrix(review_dtm.ns)
+adj = colnames(big.matrix)[colnames(big.matrix) %in% sentiments$word]
+
+X_train = subset(big.matrix, select = adj)
+y_train = review.train$stars
+```
+
+
+```{r}
+set.seed(154)
+trn.data = as.data.frame(cbind(X_train, y_train))
+
+index = sample(1:nrow(trn.data), 87355, replace = FALSE)
+actual_y = y_train[-index]
+# ls
+ls = lm(y_train ~., data = trn.data[index,])
+ls.pred = predict(ls, newdata=trn.data[-index,])
+
+```
+
+```{r}
+library(rpart)
+library(rpart.plot)
+# CART
+cart.fit.reg <- rpart(y_train~., data = as.data.frame(trn.data[index,]))
+rpart.plot(cart.fit.reg)
+cart.pred.reg = predict(cart.fit.reg, newdata=trn.data[-index,])  
+cart.mse.reg = mean((cart.pred.reg-actual_y)^2)
+cart.mse.reg
+
+cart.fit.class <- rpart(as.factor(y_train)~., data = as.data.frame(trn.data[index,]))
+rpart.plot(cart.fit.class)
+cart.pred.class = predict(cart.fit.class, newdata=trn.data[-index,],type = "class")  
+#misClassif = 1- sum(cart.pred.class==actual_y)/length(actual_y)
+#misClassif
+cart.mse.class = mean((as.numeric(cart.pred.class)-actual_y)^2)
+cart.mse.class
+```
+
+```{r}
+# Bagging
+library(ipred)
+bag.fit<-bagging(y_train~., data = as.data.frame(trn.data[index,]))
+bag.pred.reg = predict(bag.fit, newdata=trn.data[-index,]) 
+
+submit.bag.reg = as.data.frame(cbind(business_id = as.character(review.train[-index,]$business_id),
+                             predicts = as.numeric(bag.pred.reg)))
+submit.bag.reg = aggregate(as.numeric(as.character(bag.pred.reg)) ~ business_id, submit.bag.reg, mean)
+
+colnames(submit.bag.reg) = c("business_id","stars")
+real_value = aggregate(stars~business_id, review.train[-index,],mean)
+bag.mse.reg = mean((submit.bag.reg$stars-real_value$stars)^2)
+
+
+bag.fit.class <- bagging(as.factor(y_train)~., data = as.data.frame(trn.data[index,]))
+bag.pred.class = predict(bag.fit.class, newdata=trn.data[-index,],type = "class")  
+submit.bag.class = as.data.frame(cbind(business_id = as.character(review.train[-index,]$business_id),
+                             predicts = as.numeric(bag.pred.class)))
+submit.bag.class = aggregate(as.numeric(as.character(bag.pred.class)) ~ business_id, submit.bag.class, mean)
+
+colnames(submit.bag.class) = c("business_id","stars")
+real_value = aggregate(stars~business_id, review.train[-index,],mean)
+bag.mse.class = mean((submit.bag.class$stars-real_value$stars)^2)
+
+
+```
+
+
+
+
+```{r}
+###MAKE A SUBMISSION#####
+ # make a submission
+submit.cart.class = as.data.frame(cbind(business_id = as.character(review.train[-index,]$business_id),
+                             predicts = as.numeric(cart.pred.class)))
+submit.cart.class = aggregate(as.numeric(as.character(cart.pred.class)) ~ business_id, submit.cart.class, mean)
+
+colnames(submit.cart.class) = c("business_id","stars")
+real_value = aggregate(stars~business_id, review.train[-index,],mean)
+cart.mse.class = mean((submit.cart.class$stars-real_value$stars)^2)
+
+
+submit.cart.reg = as.data.frame(cbind(business_id = as.character(review.train[-index,]$business_id),
+                             predicts = as.numeric(cart.pred.reg)))
+submit.cart.reg = aggregate(as.numeric(as.character(cart.pred.reg)) ~ business_id, submit.cart.reg, mean)
+
+colnames(submit.cart.reg) = c("business_id","stars")
+real_value = aggregate(stars~business_id, review.train[-index,],mean)
+cart.mse.reg = mean((submit.cart.reg$stars-real_value$stars)^2)
+
+```
+
+```{r}
+write.csv(submit,"submission.csv")
+```
+
