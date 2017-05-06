@@ -1,0 +1,153 @@
+---
+title: "154finalreport"
+author: "Feng Lin"
+date: "4/30/2017"
+output: pdf_document
+---
+
+
+```{r}
+set.seed(154)
+library(tm)
+library(nnet)
+library(e1071)
+
+review_train = read.csv('yelp_academic_dataset_review_train.csv')
+review_test = read.csv('yelp_academic_dataset_review_test.csv')
+
+reviews = as.vector(review_train$text)
+reviews.tt = as.vector(review_test$text)
+stopWords = c(stopwords("en"), "") 
+
+
+cleanCorpus = function(corpus){
+  review_corpus = tm_map(corpus, content_transformer(tolower))
+  review_corpus = tm_map(review_corpus, removeNumbers)
+  review_corpus = tm_map(review_corpus, removePunctuation)
+  review_corpus = tm_map(review_corpus, removeWords, c("the", "and", stopwords("english")))
+  review_corpus =  tm_map(review_corpus, stripWhitespace)
+}
+
+library(SnowballC)
+review_corpus = cleanCorpus(Corpus(VectorSource(reviews)))
+review_corpus.tt = cleanCorpus(Corpus(VectorSource(reviews.tt)))
+
+review_dtm = DocumentTermMatrix(review_corpus)
+review_dtm.tt = DocumentTermMatrix(review_corpus.tt)
+
+review_dtm = removeSparseTerms(review_dtm, 0.999)
+
+library(tidytext)
+big.matrix = as.matrix(review_dtm)
+
+adj = colnames(big.matrix)[colnames(big.matrix) %in% sentiments$word]
+
+X_train = big.matrix[,colnames(big.matrix) %in% adj]
+
+y_train = review_train$stars
+
+trn.data = as.data.frame(cbind(y_train, X_train))
+
+```
+
+
+#form testing data
+```{r}
+cnames = colnames(X_train)
+preds1 = as.matrix(review_dtm.tt)
+
+preds = subset(preds1, select = colnames(preds1)[colnames(preds1) %in% cnames])
+dim(preds)
+
+preds.df = as.data.frame(preds)
+```
+
+
+#ols
+```{r}
+basic_lin_mod = lm(y_train ~ ., data = trn.data)
+
+predicts.lm = predict(basic_lin_mod, preds.df)
+final.pred = predicts.lm
+
+# write.csv(predicts.lm,"linearPred.csv", row.names = FALSE)
+```
+
+###MAKE A SUBMISSION#####
+ # make a submission original
+```{r}
+submit = as.data.frame(cbind(business_id = as.character(review_test$business_id),
+                             predicts = as.numeric(final.pred)))
+submit = aggregate(as.numeric(as.character(final.pred)) ~ business_id, submit, mean)
+
+colnames(submit) = c("business_id","stars")
+write.csv(submit,"lm-kaggle.csv", row.names = FALSE)
+
+```
+
+
+#lasso
+```{r}
+library(glmnet)
+cv.lasso<-cv.glmnet(X_train,y_train, type.measure="mse",alpha =1, nfolds = 5)
+cv.lasso.pred = predict(cv.lasso, newx = preds, s = "lambda.min")
+final.pred = cv.lasso.pred
+# write.csv(cv.lasso.pred,"lassoPred.csv", row.names = FALSE)
+```
+
+###MAKE A SUBMISSION#####
+ # make a submission original
+```{r}
+submit = as.data.frame(cbind(business_id = as.character(review_test$business_id),
+                             predicts = as.numeric(final.pred)))
+submit = aggregate(as.numeric(as.character(final.pred)) ~ business_id, submit, mean)
+
+colnames(submit) = c("business_id","stars")
+write.csv(submit,"lasso-kaggle.csv", row.names = FALSE)
+
+```
+
+#ridge
+```{r}
+cv.ridge<-cv.glmnet(X_train,y_train, type.measure="mse",alpha = 0, nfolds = 5)
+cv.ridge.pred = predict(cv.ridge, newx = preds, s = "lambda.min")
+final.pred = cv.ridge.pred
+
+# write.csv(cv.ridge.pred,"ridgePred.csv", row.names = FALSE)
+```
+
+###MAKE A SUBMISSION#####
+ # make a submission original
+```{r}
+submit = as.data.frame(cbind(business_id = as.character(review_test$business_id),
+                             predicts = as.numeric(final.pred)))
+submit = aggregate(as.numeric(as.character(final.pred)) ~ business_id, submit, mean)
+
+colnames(submit) = c("business_id","stars")
+write.csv(submit,"ridge-kaggle.csv", row.names = FALSE)
+
+```
+
+
+#ordered logistic regression
+```{r}
+library(MASS)
+trn.data$y_train = as.factor(trn.data$y_train)
+ordered_logistic_regression = polr(y_train ~ ., data = trn.data)
+predicts.olr = predict(ordered_logistic_regression, preds.df)
+final.pred = predicts.olr
+# write.csv(predicts.olr,"polrPred.csv", row.names = FALSE)
+
+```
+
+###MAKE A SUBMISSION#####
+ # make a submission original
+```{r}
+submit = as.data.frame(cbind(business_id = as.character(review_test$business_id),
+                             predicts = as.numeric(final.pred)))
+submit = aggregate(as.numeric(as.character(final.pred)) ~ business_id, submit, mean)
+
+colnames(submit) = c("business_id","stars")
+write.csv(submit,"olr-kaggle.csv", row.names = FALSE)
+```
+
